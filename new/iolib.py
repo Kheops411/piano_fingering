@@ -1,4 +1,4 @@
-from music21 import converter
+from music21 import converter, note
 from music21.articulations import Fingering
 import os
 import subprocess
@@ -20,6 +20,7 @@ class INote:
         self.NinChord = 0
         self.chordID = 0
         self.noteID = 0
+        self.reference_fingerings: list[int] = []
 
 def get_finger_music21(n, j=0):
     fingers = []
@@ -166,3 +167,62 @@ def write_score(sf, rh_noteseq, lh_noteseq, outputfile, rbeam, lbeam, below_beam
     if lh_noteseq:
         sf = _annotate_fingers_xml(sf, lh_noteseq, lbeam, below_beam)
     sf.write('musicxml', fp=outputfile)
+
+
+def read_pig(fname: str, beam: int) -> list[INote]:
+    noteseq = []
+    noteID = 0
+    with open(fname, 'r') as f:
+        for line in f:
+            if line.startswith('//'):
+                continue
+
+            parts = line.strip().split('\t')
+            if len(parts) < 7:
+                continue
+
+            channel = int(parts[6])
+            if channel != beam:
+                continue
+
+            an = INote()
+            an.noteID = noteID
+
+            # Time and duration
+            an.time = float(parts[1])
+            an.duration = float(parts[2]) - an.time
+
+            # Pitch and spatial coordinates
+            try:
+                n = note.Note(parts[3])
+                an.name = n.name
+                an.octave = n.octave
+                an.pitch = n.pitch.midi
+                an.x = utils.keypos(n)
+                an.isBlack = n.pitch.pitchClass in [1, 3, 6, 8, 10]
+            except Exception:
+                continue
+
+
+            # Reference fingerings
+            if len(parts) > 7:
+                try:
+                    fingering_str = parts[7]
+                    raw_fingerings = [int(f) for f in fingering_str.split('_')]
+
+                    filtered_fingerings = []
+                    if channel == 0: # Right hand
+                        filtered_fingerings = [f for f in raw_fingerings if f > 0]
+                    else: # Left hand
+                        filtered_fingerings = [f for f in raw_fingerings if f < 0]
+
+                    an.reference_fingerings = [abs(f) for f in filtered_fingerings]
+                except (ValueError, IndexError):
+                    an.reference_fingerings = []
+            else:
+                an.reference_fingerings = []
+
+            noteseq.append(an)
+            noteID += 1
+
+    return noteseq
